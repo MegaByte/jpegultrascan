@@ -4,7 +4,7 @@ jpegultrascan
 =head1 DESCRIPTION
 JPEG recompressor that tries all scan possibilities to minimize size losslessly
 =head1 VERSION
-1.0.0 2016-04-25
+1.1.0 2016-06-25
 =head1 LICENSE
 Copyright 2015 - 2016 Aaron Kaluszka
 
@@ -75,26 +75,35 @@ my $maxperfile = 60;
 my $minchunk = $threads;
 my (%sizes, $planes, %optimal, @scans, %dcsize, %dcscans, @acsize, @acscans, $acallsize, $acallscans, $width, $width2);
 my ($bestsize, $best) = (~0, '');
+my ($tran, $tran2);
 undef $/;
 $| = 1;
 
 sub read_file($) {
   my ($file) = @_;
   open my $FILE, $file or die "Couldn't read file";
+  binmode $FILE;
   my $data = <$FILE>;
   close $FILE;
-  return $data;
+  $data;
 }
 
 sub write_file($@) {
   my $file = shift;
   open my $FILE, '>', $file or die "Couldn't write file";
+  binmode $FILE;
   print $FILE join '', @_;
   close $FILE;
 }
 
 sub tran(@) {
-  return `$jpegtran -optimize @_`;
+  `$jpegtran -optimize @_`;
+}
+
+sub wintran(@) {
+  my (undef, $tmp) = tempfile(SUFFIX => $$);
+  system("$jpegtran -optimize @_ $tmp");
+  read_file($tmp);
 }
 
 sub scansizes($) {
@@ -117,16 +126,16 @@ sub scansizes($) {
     }
     $scanstart = $-[0] + $len if $type == 218;
   }
-  return @sizes;
+  @sizes;
 }
 
 sub transcan($$) {
   my ($start, $end) = @_;
-  my (undef, $tmp) = tempfile();
+  my (undef, $tmp) = tempfile(SUFFIX => $$);
   my @sizes;
   for my $i ($start .. $end) {
     write_file($tmp, @{$scans[$i]});
-    my $data = tran('-scans', $tmp, $arith, $jtmp);
+    my $data = &$tran('-scans', $tmp, $arith, $jtmp);
     if (length $data == 0) {
       print STDERR "\nNo data returned for:\n", join '', @{$scans[$i]};
       next;
@@ -150,7 +159,21 @@ sub transcan($$) {
     }
     push @sizes, $i, @sizesi;
   }
-  return @sizes;
+  @sizes;
+}
+
+sub pipefork() {
+  pipe my $parent, my $child or die "Couldn't pipe\n";
+  my $pid = fork;
+  die "fork() failed: $!" unless defined $pid;
+  if ($pid) {
+    close $child;
+  } else {
+    close $parent;
+	close STDOUT;
+    open STDOUT, '>&=', fileno($child) or die "Couldn't open STDOUT\n";
+  }
+  ($parent, $pid);
 }
 
 sub doscans() {
@@ -215,7 +238,7 @@ sub generatebitscans($$$$) {
   for (my $i = $numbits; $i > 0; --$i) {
     push @scans, "$plane: $a $b $i " . ($i - 1) . ";\n";
   }
-  return @scans;
+  @scans;
 }
 
 sub generatedcscans($) {
@@ -258,7 +281,7 @@ sub choosebest($$$$) {
   return if !$leftsize && !$rightsize;
   return ($leftsize, $left) if !$rightsize || $leftsize && $leftsize < $rightsize;
   return ($rightsize, $right) if !$leftsize || $rightsize && $leftsize > $rightsize || scalar(() = $left =~ /\n/g) > scalar(() = $right =~ /\n/g);
-  return ($leftsize, $left);
+  ($leftsize, $left);
 }
 
 sub trybits($$$) {
@@ -272,7 +295,7 @@ sub trybits($$$) {
     }
     ($minsize, $minscans) = choosebest($size, $scans, $minsize, $minscans);
   }
-  return ($minsize, $minscans);
+  ($minsize, $minscans);
 }
 
 sub trysplits($$$);
@@ -288,7 +311,7 @@ sub trysplits($$$) {
     }
     $optimal{$key} = [$minsize, $minscans];
   }
-  return @{$optimal{$key}};
+  @{$optimal{$key}};
 }
 
 sub app0remove($) {
@@ -298,7 +321,7 @@ sub app0remove($) {
     substr $file, 2, $size, '';
     print $verbose ? "\nRemoved $size APP0 bytes.\n" : '.';
   }
-  return $file;
+  $file;
 }
 
 sub partitionscans($@);
@@ -339,15 +362,25 @@ sub partitionscans($@) {
   }
 }
 
-open my $OLDERR, '>&', STDERR;
-open STDERR, '>', $ftmp;
-open my $TRAN, '-|', $jpegtran2, '-v', @strip, '-optimize', $fin;
-my $data = <$TRAN>;
-close $TRAN;
-open STDERR, '>&', $OLDERR;
-write_file($jtmp, $data);
-undef $data;
-read_file($ftmp) =~ /components=(\d+)/ or die "Couldn't read file";
+my $data = `$jpegtran -? 2>&1`;
+$tran = $data =~ /outputfile/ ? \&wintran : \&tran;
+$data = `$jpegtran2 -? 2>&1`;
+if ($data =~ /outputfile/)
+{
+  $data = `$jpegtran2 -v @strip -optimize $fin $jtmp 2>&1`;
+  $tran2 = \&wintran;
+} else {
+  open my $OLDERR, '>&', STDERR;
+  open STDERR, '>', $ftmp;
+  open my $TRAN, '-|', $jpegtran2, '-v', @strip, '-optimize', $fin;
+  $data = <$TRAN>;
+  close $TRAN;
+  open STDERR, '>&', $OLDERR;
+  write_file($jtmp, $data);
+  $data = read_file($ftmp);
+  $tran2 = \&tran;
+}
+$data =~ /components=(\d+)/ or die "Couldn't read file";
 $planes = $1 - 1;
 $width = ($planes + 1) * 2 + 10;
 $width2 = length $insize;
@@ -382,12 +415,12 @@ $best = join "\n", sort {
   return !defined $aa || !defined $ba ? $ap cmp $bp : $aa <=> $ba || $ap cmp $bp || $bd <=> $ad;
 } split "\n", $best;
 write_file($ftmp, $best);
-$data = tran('-scans', $ftmp, $arith, @strip, $jtmp);
+$data = &$tran('-scans', $ftmp, $arith, @strip, $jtmp);
 $data = app0remove($data) if $app0;
 
 if ($jpegtran ne $jpegtran2) {
   $jpegtran = $jpegtran2;
-  my $data2 = tran('-scans', $ftmp, $arith, @strip, $jtmp);
+  my $data2 = &$tran2('-scans', $ftmp, $arith, @strip, $jtmp);
   $data2 = app0remove($data2) if $app0;
   $data = $data2 if length $data2 && length $data2 < length $data;
 }
