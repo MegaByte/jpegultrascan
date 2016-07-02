@@ -190,8 +190,8 @@ sub doscans() {
     my $end = scalar @scans;
     my @fh;
     for (my $start = 0; $start < $end; $start += $chunk) {
-      my $fh;
-      unless (open $fh, '-|') {
+	  my ($fh, $pid) = pipefork();
+      unless ($pid) {
         print join ',', transcan($start, ($start + $chunk < $end - $minchunk ? $start + $chunk : $end) - 1);
         exit;
       }
