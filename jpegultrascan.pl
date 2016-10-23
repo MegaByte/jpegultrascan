@@ -4,7 +4,7 @@ jpegultrascan
 =head1 DESCRIPTION
 JPEG recompressor that tries all scan possibilities to minimize size losslessly
 =head1 VERSION
-1.1.0 2016-06-25
+1.2.0 2016-10-16
 =head1 LICENSE
 Copyright 2015 - 2016 Aaron Kaluszka
 
@@ -73,7 +73,7 @@ my (undef, $ftmp) = tempfile();
 my (undef, $jtmp) = tempfile();
 my $maxperfile = 60;
 my $minchunk = $threads;
-my (%sizes, $planes, %optimal, @scans, %dcsize, %dcscans, @acsize, @acscans, $acallsize, $acallscans, $width, $width2);
+my (%sizes, $planes, %optimal, %optimal2, @scans, %dcsize, %dcscans, @acsize, @acscans, $acallsize, $acallscans, $width, $width2);
 my ($bestsize, $best) = (~0, '');
 my ($tran, $tran2);
 undef $/;
@@ -170,7 +170,7 @@ sub pipefork() {
     close $child;
   } else {
     close $parent;
-	close STDOUT;
+    close STDOUT;
     open STDOUT, '>&=', fileno($child) or die "Couldn't open STDOUT\n";
   }
   ($parent, $pid);
@@ -284,18 +284,21 @@ sub choosebest($$$$) {
   ($leftsize, $left);
 }
 
-sub trybits($$$) {
-  my ($plane, $a, $b) = @_;
-  my ($minsize, $minscans) = (~0, '');
-  for (0 .. $maxbits) {
-    my ($size, $scans) = (0, '');
-    for (generatebitscans($plane, $a, $b, $_)) {
-      $size += $sizes{$_};
-      $scans .= $_;
+sub trybitsplits($$$$$);
+sub trybitsplits($$$$$) {
+  my ($plane, $a, $b, $c, $d) = @_;
+  my $key = "$plane $a $b $c $d";
+  unless (defined $optimal2{$key}) {
+    my $minscans = "$plane: $a $b $c $d;\n";
+    my $minsize = $sizes{$minscans};
+    for ($a .. $b - 1) {
+      my ($asize, $ascans) = trybitsplits($plane, $a, $_, $c, $d);
+      my ($bsize, $bscans) = trybitsplits($plane, $_ + 1, $b, $c, $d);
+      ($minsize, $minscans) = choosebest($asize + $bsize, $ascans . $bscans, $minsize, $minscans);
     }
-    ($minsize, $minscans) = choosebest($size, $scans, $minsize, $minscans);
+    $optimal2{$key} = [$minsize, $minscans];
   }
-  ($minsize, $minscans);
+  @{$optimal2{$key}};
 }
 
 sub trysplits($$$);
@@ -303,7 +306,16 @@ sub trysplits($$$) {
   my ($plane, $a, $b) = @_;
   my $key = "$plane $a $b";
   unless (defined $optimal{$key}) {
-    my ($minsize, $minscans) = trybits($plane, $a, $b);
+    my ($minsize, $minscans) = (~0, '');
+    for (0 .. $maxbits) {
+      my ($allsize, $allscans) = trybitsplits($plane, $a, $b, 0, $_);
+      for (my $i = $_; $i > 0; --$i) {
+        my ($size, $scans) = trybitsplits($plane, $a, $b, $i, $i - 1);
+        $allsize += $size;
+        $allscans .= $scans;
+      }
+      ($minsize, $minscans) = choosebest($allsize, $allscans, $minsize, $minscans);
+    }
     for ($a .. $b - 1) {
       my ($asize, $ascans) = trysplits($plane, $a, $_);
       my ($bsize, $bscans) = trysplits($plane, $_ + 1, $b);
@@ -332,7 +344,7 @@ sub partitionscans($@) {
     if (!defined $dcsize{$_}) {
       generatedcscans($_);
       doscans();
-      ($dcsize{$_}, $dcscans{$_}) = trybits($_, 0, 0);
+      ($dcsize{$_}, $dcscans{$_}) = trysplits($_, 0, 0);
     }
     $dcallsize += $dcsize{$_};
     $dcallscans .= $dcscans{$_};
@@ -365,8 +377,7 @@ sub partitionscans($@) {
 my $data = `$jpegtran -? 2>&1`;
 $tran = $data =~ /outputfile/ ? \&wintran : \&tran;
 $data = `$jpegtran2 -? 2>&1`;
-if ($data =~ /outputfile/)
-{
+if ($data =~ /outputfile/) {
   $data = `$jpegtran2 -v @strip -optimize $fin $jtmp 2>&1`;
   $tran2 = \&wintran;
 } else {
@@ -410,9 +421,9 @@ if ($verbose) {
 }
 
 $best = join "\n", sort {
-  my ($ap, $aa, $ad) = $a =~ /^([^:]*)(?:: (\d+) \d+ \d+ (\d+))?/g;
-  my ($bp, $ba, $bd) = $b =~ /^([^:]*)(?:: (\d+) \d+ \d+ (\d+))?/g;
-  return !defined $aa || !defined $ba ? $ap cmp $bp : $aa <=> $ba || $ap cmp $bp || $bd <=> $ad;
+  my ($ap, $aa, $ab, $ad) = $a =~ /^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/g;
+  my ($bp, $ba, $bb, $bd) = $b =~ /^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/g;
+  return !defined $ab || !defined $bb ? $ap cmp $bp : $ab <=> $bb || $bd <=> $ad || $aa <=> $ba || $ap cmp $bp;
 } split "\n", $best;
 write_file($ftmp, $best);
 $data = &$tran('-scans', $ftmp, $arith, @strip, $jtmp);
