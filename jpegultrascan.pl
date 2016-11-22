@@ -4,7 +4,7 @@ jpegultrascan
 =head1 DESCRIPTION
 JPEG recompressor that tries all scan possibilities to minimize size losslessly
 =head1 VERSION
-1.2.1 2016-10-23
+1.2.2 2016-11-21
 =head1 LICENSE
 Copyright 2015 - 2016 Aaron Kaluszka
 
@@ -97,12 +97,12 @@ sub write_file($@) {
 }
 
 sub tran(@) {
-  `$jpegtran -optimize @_`;
+  `"$jpegtran" -optimize @_`;
 }
 
 sub wintran(@) {
   my (undef, $tmp) = tempfile(SUFFIX => $$);
-  system("$jpegtran -optimize @_ $tmp");
+  system(qq{"$jpegtran" -optimize @_ "$tmp"});
   read_file($tmp);
 }
 
@@ -135,7 +135,7 @@ sub transcan($$) {
   my @sizes;
   for my $i ($start .. $end) {
     write_file($tmp, @{$scans[$i]});
-    my $data = &$tran('-scans', $tmp, $arith, $jtmp);
+    my $data = &$tran('-scans', "\"$tmp\"", $arith, "\"$jtmp\"");
     if (length $data == 0) {
       print STDERR "\nNo data returned for:\n", join '', @{$scans[$i]};
       next;
@@ -374,11 +374,11 @@ sub partitionscans($@) {
   }
 }
 
-my $data = `$jpegtran -? 2>&1`;
+my $data = `"$jpegtran" -? 2>&1`;
 $tran = $data =~ /outputfile/ ? \&wintran : \&tran;
-$data = `$jpegtran2 -? 2>&1`;
+$data = `"$jpegtran2" -? 2>&1`;
 if ($data =~ /outputfile/) {
-  $data = `$jpegtran2 -v @strip -optimize $fin $jtmp 2>&1`;
+  $data = `"$jpegtran2" -v @strip -optimize "$fin" "$jtmp" 2>&1`;
   $tran2 = \&wintran;
 } else {
   open my $OLDERR, '>&', STDERR;
@@ -423,15 +423,15 @@ if ($verbose) {
 $best = join "\n", sort {
   my ($ap, $aa, $ab, $ad) = $a =~ /^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/g;
   my ($bp, $ba, $bb, $bd) = $b =~ /^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/g;
-  return !defined $ab || !defined $bb ? $ap cmp $bp : $ap eq $bp && ($aa >= $ba && $aa <= $bb || $ba >= $aa && $ba <= $ab) ? $bd <=> $ad : $aa <=> $ba || $ap cmp $bp;
+  return !defined $ab || !defined $bb ? $ap cmp $bp : ($aa >= $ba && $aa <= $bb || $ba >= $aa && $ba <= $ab ? $bd <=> $ad : $aa <=> $ba) || $ap cmp $bp;
 } split "\n", $best;
 write_file($ftmp, $best);
-$data = &$tran('-scans', $ftmp, $arith, @strip, $jtmp);
+$data = &$tran('-scans', "\"$ftmp\"", $arith, @strip, "\"$jtmp\"");
 $data = app0remove($data) if $app0;
 
 if ($jpegtran ne $jpegtran2) {
   $jpegtran = $jpegtran2;
-  my $data2 = &$tran2('-scans', $ftmp, $arith, @strip, $jtmp);
+  my $data2 = &$tran2('-scans', "\"$ftmp\"", $arith, @strip, "\"$jtmp\"");
   $data2 = app0remove($data2) if $app0;
   $data = $data2 if length $data2 && length $data2 < length $data;
 }
