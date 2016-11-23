@@ -4,7 +4,7 @@ jpegultrascan
 =head1 DESCRIPTION
 JPEG recompressor that tries all scan possibilities to minimize size losslessly
 =head1 VERSION
-1.2.2 2016-11-21
+1.2.3 2016-11-22
 =head1 LICENSE
 Copyright 2015 - 2016 Aaron Kaluszka
 
@@ -423,7 +423,7 @@ if ($verbose) {
 $best = join "\n", sort {
   my ($ap, $aa, $ab, $ad) = $a =~ /^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/g;
   my ($bp, $ba, $bb, $bd) = $b =~ /^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/g;
-  return !defined $ab || !defined $bb ? $ap cmp $bp : ($aa >= $ba && $aa <= $bb || $ba >= $aa && $ba <= $ab ? $bd <=> $ad : $aa <=> $ba) || $ap cmp $bp;
+  return !defined $ab || !defined $bb ? $ap cmp $bp : ($aa >= $ba && $aa <= $bb || $ba >= $aa && $ba <= $ab ? $ap cmp $bp || $bd <=> $ad : $aa <=> $ba) || $ap cmp $bp;
 } split "\n", $best;
 write_file($ftmp, $best);
 $data = &$tran('-scans', "\"$ftmp\"", $arith, @strip, "\"$jtmp\"");
