@@ -2,9 +2,9 @@
 =head1 NAME
 jpegultrascan
 =head1 DESCRIPTION
-JPEG recompressor that tries all scan possibilities to minimize size losslessly
+JPEG lossless recompressor that tries all scan possibilities to minimize size
 =head1 VERSION
-1.2.3 2016-11-22
+1.3.0 2016-11-27
 =head1 LICENSE
 Copyright 2015 - 2016 Aaron Kaluszka
 
@@ -24,29 +24,31 @@ limitations under the License.
 use strict;
 use warnings;
 use File::Spec;
-use File::Temp qw(tempfile);
+use File::Temp 'tempfile';
 use Getopt::Long qw(:config bundling);
 
 my $maxbits = 3;
 my $threads = 1;
-my $jpegtran = 'jpegtran';
-my $jpegtran2 = 'jpegtran';
-GetOptions('q' => \my $quiet, 'v' => \my $verbose, 'i:i' => \my $incompat, 'j' => \my $app0, 's' => \my $strip, 'a' => \my $arith,
-           'p=s' => \$jpegtran, 'o=s' => \$jpegtran2, 'b=i' => \$maxbits, 't:i' => \$threads, 'h|?' => \my $help);
+my $jpegtran = my $jpegtran2 = 'jpegtran';
+my $home = glob '~';
+GetOptions 'q' => \my $quiet, 'v' => \my $verbose, 'i:i' => \my $incompat, 'j' => \my $app0, 's' => \my $strip, 'a' => \my $arith,
+           'p=s' => \$jpegtran, 'o=s' => \$jpegtran2, 'b=i' => \$maxbits, 't:i' => \$threads, 'h|?' => \my $help;
 my @strip = ('-copy', defined $strip ? $strip eq 'some' ? 'comments' : 'none' : 'all');
 $arith = defined $arith ? '-arithmetic' : '';
 $verbose = defined $verbose;
 $app0 = defined $app0;
 $incompat = defined $incompat ? $incompat == 0 ? 1 : $incompat : 0;
 $threads = 8 if $threads < 1;
-$maxbits = 9 if $maxbits > 9;
+$maxbits = 3 if $maxbits > 3;
 $maxbits = 0 if $maxbits < 0;
+$jpegtran =~s /^~/$home/;
+$jpegtran2 =~s /^~/$home/;
 
-open STDOUT, '>', File::Spec->devnull() if defined $quiet;
+open STDOUT, '>', File::Spec->devnull if defined $quiet;
 open my $STDOUT, '>&STDOUT';
 
-@ARGV == 2 && !defined $help or die 'usage: jpegultrascan [switches] inputfile outputfile
-JPEG recompressor that tries all scan possibilities to minimize size losslessly
+@ARGV == 2 && !defined $help or die 'usage: jpegultrascan.pl [switches] inputfile outputfile
+JPEG lossless recompressor that tries all scan possibilities to minimize size
 Switches:
   -s      Strip all extra markers
   -s some Strip only non-comment markers
@@ -58,7 +60,7 @@ Switches:
           that may be incompatible with some software)
   -a      Use arithmetic coding (unsupported by most software; jpegtran support
           required)
-  -b 0-9  Maximum number of bit splits to test (default: 3)
+  -b 0-3  Maximum number of bit splits to test (default: 3)
   -t [N]  Number of simultaneous processes (default: 8 if specified,
           1 otherwise)
   -q      Suppress all output
@@ -68,9 +70,11 @@ Switches:
 ';
 
 my ($fin, $fout) = @ARGV;
+$fin =~s /^~/$home/;
+$fout =~s /^~/$home/;
 my $insize = -s $fin;
-my (undef, $ftmp) = tempfile();
-my (undef, $jtmp) = tempfile();
+my (undef, $ftmp) = tempfile;
+my (undef, $jtmp) = tempfile;
 my $maxperfile = 60;
 my $minchunk = $threads;
 my (%sizes, $planes, %optimal, %optimal2, @scans, %dcsize, %dcscans, @acsize, @acscans, $acallsize, $acallscans, $width, $width2);
@@ -81,7 +85,7 @@ $| = 1;
 
 sub read_file($) {
   my ($file) = @_;
-  open my $FILE, $file or die "Couldn't read file";
+  open my $FILE, $file or die "Couldn't read file $file";
   binmode $FILE;
   my $data = <$FILE>;
   close $FILE;
@@ -90,7 +94,7 @@ sub read_file($) {
 
 sub write_file($@) {
   my $file = shift;
-  open my $FILE, '>', $file or die "Couldn't write file";
+  open my $FILE, '>', $file or die "Couldn't write file $file";
   binmode $FILE;
   print $FILE join '', @_;
   close $FILE;
@@ -101,9 +105,9 @@ sub tran(@) {
 }
 
 sub wintran(@) {
-  my (undef, $tmp) = tempfile(SUFFIX => $$);
-  system(qq{"$jpegtran" -optimize @_ "$tmp"});
-  read_file($tmp);
+  my (undef, $tmp) = tempfile SUFFIX => $$;
+  system qq{"$jpegtran" -optimize @_ "$tmp"};
+  read_file $tmp;
 }
 
 sub scansizes($) {
@@ -131,16 +135,16 @@ sub scansizes($) {
 
 sub transcan($$) {
   my ($start, $end) = @_;
-  my (undef, $tmp) = tempfile(SUFFIX => $$);
+  my (undef, $tmp) = tempfile SUFFIX => $$;
   my @sizes;
   for my $i ($start .. $end) {
-    write_file($tmp, @{$scans[$i]});
+    write_file $tmp, @{$scans[$i]};
     my $data = &$tran('-scans', "\"$tmp\"", $arith, "\"$jtmp\"");
     if (length $data == 0) {
       print STDERR "\nNo data returned for:\n", join '', @{$scans[$i]};
       next;
     }
-    my @sizesi = scansizes($data);
+    my @sizesi = scansizes $data;
     if ($#sizesi != $#{$scans[$i]}) {
       print STDERR "\nIncorrect encoding for:\n", join '', @{$scans[$i]};
       next;
@@ -165,34 +169,34 @@ sub transcan($$) {
 sub pipefork() {
   pipe my $parent, my $child or die "Couldn't pipe\n";
   my $pid = fork;
-  die "fork() failed: $!" unless defined $pid;
+  die "fork failed: $!" unless defined $pid;
   if ($pid) {
     close $child;
   } else {
     close $parent;
     close STDOUT;
-    open STDOUT, '>&=', fileno($child) or die "Couldn't open STDOUT\n";
+    open STDOUT, '>&=', fileno $child or die "Couldn't open STDOUT\n";
   }
   ($parent, $pid);
 }
 
 sub doscans() {
   if ($threads == 1 || $#scans < $minchunk) {
-    my @sizes = transcan(0, $#scans);
+    my @sizes = transcan 0, $#scans;
     unless ($verbose) {
       for (my $i = 0; $i < $#sizes; ++$i) {
         $sizes{$_} = $sizes[++$i] for @{$scans[$sizes[$i]]};
       }
     }
   } else {
-    my $chunk = int(@scans / $threads);
+    my $chunk = int @scans / $threads;
     $chunk = $minchunk if $chunk < $minchunk;
     my $end = scalar @scans;
     my @fh;
     for (my $start = 0; $start < $end; $start += $chunk) {
-	  my ($fh, $pid) = pipefork();
+	  my ($fh, $pid) = pipefork;
       unless ($pid) {
-        print join ',', transcan($start, ($start + $chunk < $end - $minchunk ? $start + $chunk : $end) - 1);
+        print join ',', transcan $start, ($start + $chunk < $end - $minchunk ? $start + $chunk : $end) - 1;
         exit;
       }
       push @fh, $fh;
@@ -218,18 +222,18 @@ sub queuescansmulti(@) {
       do {
         pop @ac;
         --$i;
-      } while ($ac[$#ac] !~ /0;\n$/);
-      queuescans(@dc, @ac);
+      } while $ac[$#ac] !~ /0;\n$/;
+      queuescans @dc, @ac;
       @ac = ();
     }
     if ($_[$i] =~ /: 0 0/) {
       push @dc, splice @_, $i, 1;
       --$i;
-    } else  {
+    } else {
       push @ac, $_[$i];
     }
   }
-  queuescans(@dc, @ac) if @ac > 0;
+  queuescans @dc, @ac if @ac > 0;
 }
 
 sub generatebitscans($$$$) {
@@ -251,9 +255,9 @@ sub generatedcscans($) {
     $dummy =~s /^(.*?) ?$/$1: 0 0 0 9;\n/;
   }
   for (0 .. $maxbits) {
-    my @scans = generatebitscans($plane, 0, 0, $_);
+    my @scans = generatebitscans $plane, 0, 0, $_;
     push @scans, $dummy if defined $dummy;
-    queuescans(@scans);
+    queuescans @scans;
   }
 }
 
@@ -264,13 +268,13 @@ sub generateacscans($) {
     for (my $offset = 0; $offset < $numcoeffs + 1 && $offset < 63 - $numcoeffs; ++$offset) {
       for (my $numbits = 0; $numbits <= $maxbits; ++$numbits) {
         my @scans = $dummy;
-        push @scans, generatebitscans($plane, 1, $offset, $numbits) if $offset > 0;
+        push @scans, generatebitscans $plane, 1, $offset, $numbits if $offset > 0;
         my $i = $offset + 1;
         for (; $i + $numcoeffs < 63; $i += $numcoeffs + 1) {
-          push @scans, generatebitscans($plane, $i, $i + $numcoeffs, $numbits);
+          push @scans, generatebitscans $plane, $i, $i + $numcoeffs, $numbits;
         }
-        push @scans, generatebitscans($plane, $i, 63, $numbits) if $i <= 63;
-        @scans <= $maxperfile ? queuescans(@scans) : queuescansmulti(@scans);
+        push @scans, generatebitscans $plane, $i, 63, $numbits if $i <= 63;
+        @scans <= $maxperfile ? queuescans @scans : queuescansmulti @scans;
       }
     }
   }
@@ -292,9 +296,9 @@ sub trybitsplits($$$$$) {
     my $minscans = "$plane: $a $b $c $d;\n";
     my $minsize = $sizes{$minscans};
     for ($a .. $b - 1) {
-      my ($asize, $ascans) = trybitsplits($plane, $a, $_, $c, $d);
-      my ($bsize, $bscans) = trybitsplits($plane, $_ + 1, $b, $c, $d);
-      ($minsize, $minscans) = choosebest($asize + $bsize, $ascans . $bscans, $minsize, $minscans);
+      my ($asize, $ascans) = trybitsplits $plane, $a, $_, $c, $d;
+      my ($bsize, $bscans) = trybitsplits $plane, $_ + 1, $b, $c, $d;
+      ($minsize, $minscans) = choosebest $asize + $bsize, $ascans . $bscans, $minsize, $minscans;
     }
     $optimal2{$key} = [$minsize, $minscans];
   }
@@ -308,18 +312,18 @@ sub trysplits($$$) {
   unless (defined $optimal{$key}) {
     my ($minsize, $minscans) = (~0, '');
     for (0 .. $maxbits) {
-      my ($allsize, $allscans) = trybitsplits($plane, $a, $b, 0, $_);
+      my ($allsize, $allscans) = trybitsplits $plane, $a, $b, 0, $_;
       for (my $i = $_; $i > 0; --$i) {
-        my ($size, $scans) = trybitsplits($plane, $a, $b, $i, $i - 1);
+        my ($size, $scans) = trybitsplits $plane, $a, $b, $i, $i - 1;
         $allsize += $size;
         $allscans .= $scans;
       }
-      ($minsize, $minscans) = choosebest($allsize, $allscans, $minsize, $minscans);
+      ($minsize, $minscans) = choosebest $allsize, $allscans, $minsize, $minscans;
     }
     for ($a .. $b - 1) {
-      my ($asize, $ascans) = trysplits($plane, $a, $_);
-      my ($bsize, $bscans) = trysplits($plane, $_ + 1, $b);
-      ($minsize, $minscans) = choosebest($asize + $bsize, $ascans . $bscans, $minsize, $minscans);
+      my ($asize, $ascans) = trysplits $plane, $a, $_;
+      my ($bsize, $bscans) = trysplits $plane, $_ + 1, $b;
+      ($minsize, $minscans) = choosebest $asize + $bsize, $ascans . $bscans, $minsize, $minscans;
     }
     $optimal{$key} = [$minsize, $minscans];
   }
@@ -342,19 +346,19 @@ sub partitionscans($@) {
   my ($dcallsize, $dcallscans) = (0, '');
   for (@_) {
     if (!defined $dcsize{$_}) {
-      generatedcscans($_);
-      doscans();
-      ($dcsize{$_}, $dcscans{$_}) = trysplits($_, 0, 0);
+      generatedcscans $_;
+      doscans;
+      ($dcsize{$_}, $dcscans{$_}) = trysplits $_, 0, 0;
     }
     $dcallsize += $dcsize{$_};
     $dcallscans .= $dcscans{$_};
   }
-  ($bestsize, $best) = choosebest($dcallsize + $acallsize, $dcallscans . $acallscans, $bestsize, $best);
-  my @all = map {"$_;\n"} @_;
+  ($bestsize, $best) = choosebest $dcallsize + $acallsize, $dcallscans . $acallscans, $bestsize, $best;
+  my @all = map "$_;\n", @_;
   for (@all) {
     if (!defined $sizes{$_}) {
-      queuescans(@all);
-      doscans();
+      queuescans @all;
+      doscans;
       last;
     }
   }
@@ -362,14 +366,14 @@ sub partitionscans($@) {
   for (@all) {
     $allsize += $sizes{$_} if defined $sizes{$_};
   }
-  ($bestsize, $best) = choosebest($allsize, join('', @all), $bestsize, $best);
+  ($bestsize, $best) = choosebest $allsize, join('', @all), $bestsize, $best;
   for my $i ($offset .. $#_) {
     for ($i + 1 .. $#_) {
       $_[$offset] =~ /(\d+)$/;
       next if $_[$_] < $1;
       my @newpartition = @_;
       $newpartition[$i] .= ' ' . splice @newpartition, $_, 1;
-      partitionscans($i, @newpartition);
+      partitionscans $i, @newpartition;
     }
   }
 }
@@ -387,8 +391,8 @@ if ($data =~ /outputfile/) {
   $data = <$TRAN>;
   close $TRAN;
   open STDERR, '>&', $OLDERR;
-  write_file($jtmp, $data);
-  $data = read_file($ftmp);
+  write_file $jtmp, $data;
+  $data = read_file $ftmp;
   $tran2 = \&tran;
 }
 $data =~ /components=(\d+)/ or die "Couldn't read file";
@@ -398,10 +402,10 @@ $width2 = length $insize;
 
 for (0 .. $planes) {
   print "Calculating sizes of AC scans, plane $_\n";
-  generateacscans($_);
-  doscans();
+  generateacscans $_;
+  doscans;
   print "\nSearching for best AC scan, plane $_\n";
-  ($acsize[$_], $acscans[$_]) = trysplits($_, 1, 63);
+  ($acsize[$_], $acscans[$_]) = trysplits $_, 1, 63;
   $acallsize += $acsize[$_];
   $acallscans .= $acscans[$_];
   print "Best AC scan, plane $_:\n$acscans[$_]Size: $acsize[$_]\n\n" if $verbose;
@@ -409,10 +413,10 @@ for (0 .. $planes) {
 
 print "Calculating sizes and searching for best DC scan\n";
 if ($incompat > 0 && $planes > 1) {
-  partitionscans(0, 0 .. $planes);
+  partitionscans 0, 0 .. $planes;
 } else {
-  partitionscans($planes + 1, 0 .. $planes) if $planes > 0 && $incompat >= 0;
-  partitionscans(2, join ' ', 0 .. $planes);
+  partitionscans $planes + 1, 0 .. $planes if $planes > 0 && $incompat >= 0;
+  partitionscans 2, join ' ', 0 .. $planes;
 }
 if ($verbose) {
   my $dcallscans = $best;
@@ -421,27 +425,28 @@ if ($verbose) {
 }
 
 $best = join "\n", sort {
-  my ($ap, $aa, $ab, $ad) = $a =~ /^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/g;
-  my ($bp, $ba, $bb, $bd) = $b =~ /^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/g;
-  return !defined $ab || !defined $bb ? $ap cmp $bp : ($aa >= $ba && $aa <= $bb || $ba >= $aa && $ba <= $ab ? $ap cmp $bp || $bd <=> $ad : $aa <=> $ba) || $ap cmp $bp;
+  my $pattern = qr/^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/;
+  my ($ap, $aa, $ab, $ad) = $a =~ /$pattern/g;
+  my ($bp, $ba, $bb, $bd) = $b =~ /$pattern/g;
+  !defined $ab || !defined $bb ? $ap cmp $bp : $aa >= $ba && $aa <= $bb || $ba >= $aa && $ba <= $ab ? $ap cmp $bp || $bd <=> $ad : $aa <=> $ba || $ap cmp $bp;
 } split "\n", $best;
-write_file($ftmp, $best);
+write_file $ftmp, $best;
 $data = &$tran('-scans', "\"$ftmp\"", $arith, @strip, "\"$jtmp\"");
-$data = app0remove($data) if $app0;
+$data = app0remove $data if $app0;
 
 if ($jpegtran ne $jpegtran2) {
   $jpegtran = $jpegtran2;
   my $data2 = &$tran2('-scans', "\"$ftmp\"", $arith, @strip, "\"$jtmp\"");
-  $data2 = app0remove($data2) if $app0;
+  $data2 = app0remove $data2 if $app0;
   $data = $data2 if length $data2 && length $data2 < length $data;
 }
 
 my $size = length $data;
 print "\nBest scans:\n$best\nSize: $size bytes\n";
-printf "Change: %+.2f%%\n", ($size / $insize - 1) * 100;
+printf "Change: %+.6f%%\n", ($size / $insize - 1) * 100;
 
 if ($size && $size <= $insize) {
-  write_file($fout, $data);
+  write_file $fout, $data;
 } elsif ($fin ne $fout) {
-  write_file($fout, read_file($fin));
+  write_file $fout, read_file $fin;
 }
