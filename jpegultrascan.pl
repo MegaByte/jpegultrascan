@@ -4,7 +4,7 @@ jpegultrascan
 =head1 DESCRIPTION
 JPEG lossless recompressor that tries all scan possibilities to minimize size
 =head1 VERSION
-1.3.0 2016-11-27
+1.3.1 2016-11-27
 =head1 LICENSE
 Copyright 2015 - 2016 Aaron Kaluszka
 
@@ -428,8 +428,37 @@ $best = join "\n", sort {
   my $pattern = qr/^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/;
   my ($ap, $aa, $ab, $ad) = $a =~ /$pattern/g;
   my ($bp, $ba, $bb, $bd) = $b =~ /$pattern/g;
-  !defined $ab || !defined $bb ? $ap cmp $bp : $aa >= $ba && $aa <= $bb || $ba >= $aa && $ba <= $ab ? $ap cmp $bp || $bd <=> $ad : $aa <=> $ba || $ap cmp $bp;
+  !defined $ab || !defined $bb ? $ap cmp $bp : $ab <=> $bb || $ap cmp $bp;
 } split "\n", $best;
+
+my @best = map {[/^([^:]*)(?:: (\d+) (\d+) \d+ (\d+))?/g]} split "\n", $best;
+
+my @prev = ();
+for my $i (0 .. $#best) {
+  for my $j (0 .. $#best) {
+    next if $i == $j;
+    push @{$prev[$j]}, $i if (
+      ($best[$j][0] eq $best[$i][0] && ($best[$j][1] >= $best[$i][1] && $best[$j][1] <= $best[$i][2] || $best[$i][1] >= $best[$j][1] && $best[$i][1] <= $best[$j][2]) && $best[$i][3] > $best[$j][3])
+      || ($best[$j][0] gt $best[$i][0] && $best[$j][2] >= $best[$i][2])
+    );
+  }
+}
+
+my $i = -1;
+my @bestout = ();
+my %bestout = ();
+loop: while(@bestout < @best) {
+  $i = 0 if ++$i == @best;
+  next if defined $bestout{$i};
+  for my $j (@{$prev[$i]}) {
+    next loop if !defined $bestout{$j};
+  }
+  push @bestout, $i;
+  $bestout{$i} = 1;
+  $i = -1;
+}
+$best = join "\n", (split "\n", $best)[@bestout];
+
 write_file $ftmp, $best;
 $data = &$tran('-scans', "\"$ftmp\"", $arith, @strip, "\"$jtmp\"");
 $data = app0remove $data if $app0;
