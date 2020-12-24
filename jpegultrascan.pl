@@ -4,9 +4,9 @@ jpegultrascan
 =head1 DESCRIPTION
 JPEG lossless recompressor that tries all scan possibilities to minimize size
 =head1 VERSION
-1.3.1 2016-11-27
+1.3.2 2020-12-23
 =head1 LICENSE
-Copyright 2015 - 2016 Aaron Kaluszka
+Copyright 2015-2020 Aaron Kaluszka
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -107,7 +107,9 @@ sub tran(@) {
 sub wintran(@) {
   my (undef, $tmp) = tempfile SUFFIX => $$;
   system qq{"$jpegtran" -optimize @_ "$tmp"};
-  read_file $tmp;
+  my $data = read_file $tmp;
+  unlink $tmp;
+  $data;
 }
 
 sub scansizes($) {
@@ -163,6 +165,7 @@ sub transcan($$) {
     }
     push @sizes, $i, @sizesi;
   }
+  unlink $tmp;
   @sizes;
 }
 
@@ -479,3 +482,4 @@ if ($size && $size <= $insize) {
 } elsif ($fin ne $fout) {
   write_file $fout, read_file $fin;
 }
+unlink $ftmp, $jtmp;
