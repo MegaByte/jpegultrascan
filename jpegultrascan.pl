@@ -40,7 +40,7 @@ $verbose = defined $verbose;
 $app0 = defined $app0;
 $incompat = defined $incompat ? $incompat == 0 ? 1 : $incompat : 0;
 $threads = 8 if $threads < 1;
-$maxbits = 3 if $maxbits > 3;
+$maxbits = 13 if $maxbits > 13;
 $maxbits = 0 if $maxbits < 0;
 $jpegtran =~s /^~/$home/;
 $jpegtran2 =~s /^~/$home/;
@@ -61,7 +61,7 @@ Switches:
           that may be incompatible with some software)
   -a      Use arithmetic coding (unsupported by most software; jpegtran support
           required)
-  -b 0-3  Maximum number of bit splits to test (default: 3)
+  -b 0-13 Maximum number of bit splits to test (default: 3)
   -t [N]  Number of simultaneous processes (default: 8 if specified,
           1 otherwise)
   -q      Suppress all output
@@ -401,6 +401,10 @@ $data =~ /components=(\d+)/ or die "Couldn't read file";
 $planes = $1 - 1;
 $width = ($planes + 1) * 2 + 10;
 $width2 = length $insize;
+if ($maxbits > 10) {
+  $data = read_file $fin;
+  $maxbits = 10 if $data =~ /\xFF[\xC0-\xC3\xC5-\xC7\xC9-\xCB\xCD-\xCF]..(.)/s && ord $1 == 8;
+}
 
 for (0 .. $planes) {
   print "Calculating sizes of AC scans, plane $_\n";

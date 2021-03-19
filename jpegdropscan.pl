@@ -113,11 +113,13 @@ sub mapcolor($) {
 sub scaninfo($) {
   my ($file) = @_;
   my @scans;
+  my $ah = 0;
   while ($file =~ /\xFF\xDA/gs) {
     my $ns = ord substr $file, $+[0] + 2, 1;
     my $cs = join ' ', map &$mapcolor($_), unpack "(Cx)$ns", substr $file, $+[0] + 3, $ns * 2;
-    my ($ss, $se, $ahal) = unpack 'C3', substr $file, $+[0] + 3 + $ns * 2, 3;
-    push @scans, [$cs, $ss, $se, $ahal >> 4, $ahal & 3];
+    my ($ss, $se, $al) = unpack 'C3', substr $file, $+[0] + 3 + $ns * 2, 3;
+    push @scans, [$cs, $ss, $se, $ah, $al];
+    $ah = $al;
   }
   @scans;
 }
