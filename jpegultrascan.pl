@@ -4,9 +4,9 @@ jpegultrascan
 =head1 DESCRIPTION
 JPEG lossless recompressor that tries all scan possibilities to minimize size
 =head1 VERSION
-1.3.2 2020-12-23
+1.3.3 2021-03-18
 =head1 LICENSE
-Copyright 2015-2020 Aaron Kaluszka
+Copyright 2015-2021 Aaron Kaluszka
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ limitations under the License.
 
 use strict;
 use warnings;
+use open ':std', IO => ':raw';
 use File::Spec;
 use File::Temp 'tempfile';
 use Getopt::Long qw(:config bundling);
@@ -86,7 +87,6 @@ $| = 1;
 sub read_file($) {
   my ($file) = @_;
   open my $FILE, $file or die "Couldn't read file $file";
-  binmode $FILE;
   my $data = <$FILE>;
   close $FILE;
   $data;
@@ -95,7 +95,6 @@ sub read_file($) {
 sub write_file($@) {
   my $file = shift;
   open my $FILE, '>', $file or die "Couldn't write file $file";
-  binmode $FILE;
   print $FILE join '', @_;
   close $FILE;
 }

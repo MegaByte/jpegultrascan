@@ -4,9 +4,9 @@ jpegdropscan
 =head1 DESCRIPTION
 JPEG lossy recompressor that removes least informative scans to reach a target quality
 =head1 VERSION
-1.0.0 2016-11-27
+1.0.1 2021-03-18
 =head1 LICENSE
-Copyright 2015 - 2016 Aaron Kaluszka
+Copyright 2015 - 2021 Aaron Kaluszka
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ limitations under the License.
 
 use strict;
 use warnings;
+use open ':std', IO => ':raw';
 use File::Spec;
 use File::Temp 'tempfile';
 use Getopt::Long qw(:config bundling);
@@ -70,7 +71,6 @@ $| = 1;
 sub read_file($) {
   my ($file) = @_;
   open my $FILE, $file or die "Couldn't read file $file";
-  binmode $FILE;
   my $data = <$FILE>;
   close $FILE;
   $data;
@@ -79,7 +79,6 @@ sub read_file($) {
 sub write_file($@) {
   my $file = shift;
   open my $FILE, '>', $file or die "Couldn't write file $file";
-  binmode $FILE;
   print $FILE join '', @_;
   close $FILE;
 }
