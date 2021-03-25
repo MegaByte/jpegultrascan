@@ -4,7 +4,7 @@ jpegultrascan
 =head1 DESCRIPTION
 JPEG lossless recompressor that tries all scan possibilities to minimize size
 =head1 VERSION
-1.3.3 2021-03-18
+1.3.4 2021-03-24
 =head1 LICENSE
 Copyright 2015-2021 Aaron Kaluszka
 
@@ -224,7 +224,7 @@ sub queuescansmulti(@) {
       do {
         pop @ac;
         --$i;
-      } while $ac[$#ac] !~ /0;\n$/;
+      } while $ac[$#ac] !~ / 0;\n$/;
       queuescans @dc, @ac;
       @ac = ();
     }
