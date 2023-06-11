@@ -4,9 +4,9 @@ jpegdropscan
 =head1 DESCRIPTION
 JPEG lossy recompressor that removes least informative scans to reach a target quality
 =head1 VERSION
-1.0.1 2021-03-18
+1.0.2 2023-06-10
 =head1 LICENSE
-Copyright 2015 - 2021 Aaron Kaluszka
+Copyright 2015 - 2023 Aaron Kaluszka
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,11 +31,14 @@ use Getopt::Long qw(:config bundling);
 my $jpegtran = 'jpegtran';
 my $butteraugli = 'butteraugli';
 my $home = glob '~';
-GetOptions 'q' => \my $quiet, 'v' => \my $verbose, 'd=f' => \my $quality,
+my $quality = 0;
+my $maxbits = 3;
+GetOptions 'q' => \my $quiet, 'v' => \my $verbose, 'd=f' => \$quality,
            'p=s' => \$jpegtran, 'c=s' => \$butteraugli, 'r=s' => \my $reference, 'h|?' => \my $help;
 $verbose = defined $verbose;
 $jpegtran =~s /^~/$home/;
 $butteraugli =~s /^~/$home/;
+$quality = 0 if $quality < 0;
 
 open STDOUT, '>', File::Spec->devnull if defined $quiet;
 
@@ -111,15 +114,14 @@ sub mapcolor($) {
 }
 
 sub scaninfo($) {
-  my ($file) = @_;
+  my $file = substr $_[0], 2;
+  $file = substr $file, $+[0] while $file =~ /\xFF\xD8.+?\xFF\xD9/s; # skip thumbnail(s)
   my @scans;
-  my $ah = 0;
   while ($file =~ /\xFF\xDA/gs) {
     my $ns = ord substr $file, $+[0] + 2, 1;
     my $cs = join ' ', map &$mapcolor($_), unpack "(Cx)$ns", substr $file, $+[0] + 3, $ns * 2;
-    my ($ss, $se, $al) = unpack 'C3', substr $file, $+[0] + 3 + $ns * 2, 3;
-    push @scans, [$cs, $ss, $se, $ah, $al];
-    $ah = $al;
+    my ($ss, $se, $ahal) = unpack 'C3', substr $file, $+[0] + 3 + $ns * 2, 3;
+    push @scans, [$cs, $ss, $se, $ahal >> 4, $ahal & 3];
   }
   @scans;
 }
@@ -173,15 +175,9 @@ sub inside($$$$) {
   $_[0] >= $_[2] && $_[0] <= $_[3] || $_[2] >= $_[0] && $_[2] <= $_[1];
 }
 
-sub scansort() {
-  my ($ap, $aa, $ab, undef, $ad) = @$a;
-  my ($bp, $ba, $bb, undef, $bd) = @$b;
-  !defined $ab || !defined $bb ? $ap cmp $bp : inside($aa, $ab, $ba, $bb) ? $ap cmp $bp || $bd <=> $ad : $aa <=> $ba || $ap cmp $bp;
-}
-
 sub shavebits() {
   my @s = clone(@best);
-  for (my $b = 1; $b <= 3; ++$b) {
+  for (my $b = 1; $b <= $maxbits; ++$b) {
     attempt: for (my $s = $#s; $s > 0; --$s) {
       my @lastscan = clone @s;
       next if $s[$s][4] != $b - 1;
@@ -200,8 +196,7 @@ sub shavebits() {
             last;
           }
         }
-        my $result = $skip ? -1 : checkbest @s;
-        if ($result == -1) {
+        if ($skip || checkbest @s == -1) {
           my ($p, $q) = @{$s[$s]}[1, 2];
           if ($p < $q) {
             $s[$s][4] = $b - 1;
@@ -243,9 +238,38 @@ sub shavecoefs() {
 }
 
 my $origdata = read_file $fin;
+die "$fin is not a valid JPEG file" if length($origdata) < 4 || "\xFF\xD8" ne substr $origdata, 0, 2;
 $app0 = "\xFF\xE0" eq substr $origdata, 2, 2;
 $tran = `"$jpegtran" -? 2>&1` =~ /outputfile/ ? \&wintran : \&tran;
-my @scans = sort scansort sort scansort scaninfo $origdata;
+my @scans = sort {
+  my ($ap, $aa, $ab) = @$a;
+  my ($bp, $ba, $bb) = @$b;
+  !defined $ab || !defined $bb ? $ap cmp $bp : $ab <=> $bb || $ap cmp $bp;
+} scaninfo $origdata;
+
+my @prev = ();
+for my $i (0 .. $#scans) {
+  for my $j (0 .. $#scans) {
+    next if $i == $j;
+    push @{$prev[$j]}, $i if ($scans[$j][0] eq $scans[$i][0] && inside($scans[$i][1], $scans[$i][2], $scans[$j][1], $scans[$j][2]) && $scans[$i][4] > $scans[$j][4]) || ($scans[$j][0] gt $scans[$i][0] && $scans[$j][2] >= $scans[$i][2]);
+  }
+}
+
+my $i = -1;
+my @order = ();
+my %order = ();
+loop: while(@order < @scans) {
+  $i = 0 if ++$i == @scans;
+  next if defined $order{$i};
+  for my $j (@{$prev[$i]}) {
+    next loop unless defined $order{$j};
+  }
+  push @order, $i;
+  $order{$i} = 1;
+  $i = -1;
+}
+@scans = @scans[@order];
+
 for (my $i = 0; $i < @scans; ++$i) {
   my @s = @{$scans[$i]};
   if ($s[1] == 0 && $s[2] > 0) {
