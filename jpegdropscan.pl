@@ -196,7 +196,7 @@ sub shavebits() {
             last;
           }
         }
-        if ($skip || checkbest @s == -1) {
+        if ($skip || checkbest(@s) == -1) {
           my ($p, $q) = @{$s[$s]}[1, 2];
           if ($p < $q) {
             $s[$s][4] = $b - 1;
